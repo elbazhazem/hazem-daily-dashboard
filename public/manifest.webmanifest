@@ -1,0 +1,10 @@
+{
+  "name": "Hazem Daily Dashboard",
+  "short_name": "Daily Dashboard",
+  "description": "Calendar, tasks, notes, and daily progress in one private workspace.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#071a2b",
+  "theme_color": "#0b3b60",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
