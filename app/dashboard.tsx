@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, format, isToday, parseISO } from "date-fns";
 import { CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, ExternalLink, Link2, ListTodo, LogOut, MapPin, Moon, NotebookPen, Pencil, Plus, RefreshCw, Search, Sun, Trash2, X } from "lucide-react";
+import AppSidebar from "../components/app-sidebar";
 
 type Task = { id: number; title: string; description: string; taskDate: string; dueTime: string | null; priority: "high" | "medium" | "low"; status: "not_started" | "in_progress" | "completed"; category: string };
 type TaskStatus = Task["status"];
@@ -162,7 +163,9 @@ export default function Dashboard({ displayName, email }: { displayName: string;
   };
 
   return (
-    <main className="app-shell">
+    <div className="site-layout">
+      <AppSidebar active="dashboard" />
+      <main className="app-shell site-content">
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><CheckCircle2 /></div><div><strong>Daily Dashboard</strong><span>Academic workspace</span></div></div>
         <div className="date-nav" aria-label="Date navigation">
@@ -201,7 +204,8 @@ export default function Dashboard({ displayName, email }: { displayName: string;
 
       {showTaskForm && <TaskDialog date={date} onClose={() => setShowTaskForm(false)} onSubmit={addTask} />}
       {selectedTask && <TaskDetailDialog task={selectedTask} onClose={() => setSelectedTask(null)} onSave={(form) => saveTaskChanges(selectedTask, form)} onDelete={removeTask} />}
-    </main>
+      </main>
+    </div>
   );
 }
 
