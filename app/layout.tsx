@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Hazem Daily Dashboard",
   description: "A private daily workspace for calendar events, tasks, notes, and progress.",
+  other: {
+    "codex-preview": "development",
+  },
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/favicon.svg",

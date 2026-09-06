@@ -83,3 +83,13 @@ test("renders sidebar skeletons deterministically", async () => {
   assert.equal(first, second);
   assert.match(first, /--skeleton-width:70%/);
 });
+
+test("autosaves notes only to the day whose note is loaded", async () => {
+  const { shouldAutosaveDailyNote } = await vite.ssrLoadModule(
+    "/lib/daily-notes.ts",
+  );
+
+  assert.equal(shouldAutosaveDailyNote("2026-09-06", "2026-09-06"), true);
+  assert.equal(shouldAutosaveDailyNote("2026-09-06", "2026-09-07"), false);
+  assert.equal(shouldAutosaveDailyNote(null, "2026-09-07"), false);
+});

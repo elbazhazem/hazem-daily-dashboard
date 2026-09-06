@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, format, isToday, parseISO } from "date-fns";
 import { CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, ExternalLink, Link2, ListTodo, LogOut, MapPin, Moon, NotebookPen, Pencil, Plus, RefreshCw, Search, Sun, Trash2, X } from "lucide-react";
 import AppSidebar from "../components/app-sidebar";
+import { shouldAutosaveDailyNote } from "../lib/daily-notes";
 
 type Task = { id: number; title: string; description: string; taskDate: string; dueTime: string | null; priority: "high" | "medium" | "low"; status: "not_started" | "in_progress" | "completed"; category: string };
 type TaskStatus = Task["status"];
@@ -49,9 +50,11 @@ export default function Dashboard({ displayName, email }: { displayName: string;
   const [greeting, setGreeting] = useState("Welcome");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [tab, setTab] = useState<"overview" | "events" | "tasks" | "notes">("overview");
-  const noteReady = useRef(false);
+  const loadedNoteDate = useRef<string | null>(null);
+  const loadSequence = useRef(0);
 
   const loadDay = useCallback(async () => {
+    const requestSequence = ++loadSequence.current;
     setLoading(true);
     const day = isoDate(date);
     try {
@@ -65,19 +68,24 @@ export default function Dashboard({ displayName, email }: { displayName: string;
       const [taskResponse, noteResponse, calendarResponse, statusResponse] = await Promise.all([
         fetch(`/api/tasks?date=${day}`), fetch(`/api/notes?date=${day}`), fetch(`/api/calendar?date=${day}`), fetch("/api/google/status"),
       ]);
+      if (requestSequence !== loadSequence.current) return;
       if (taskResponse.ok) setTasks(sortTasksByImportance((await taskResponse.json()).tasks ?? []));
       if (noteResponse.ok) {
         const note = (await noteResponse.json()).note;
-        noteReady.current = false;
+        loadedNoteDate.current = null;
         setNoteTitle(note?.title ?? "Daily notes");
         setNoteContent(note?.content ?? "");
-        setTimeout(() => { noteReady.current = true; }, 0);
+        setTimeout(() => {
+          if (requestSequence === loadSequence.current) loadedNoteDate.current = day;
+        }, 0);
       }
       const status = statusResponse.ok ? await statusResponse.json() : { connected: false, configured: false };
       const calendarData = calendarResponse.ok ? await calendarResponse.json() : { connected: false, events: [] };
       setCalendar({ ...status, ...calendarData });
       setEvents(calendarData.events ?? []);
-    } finally { setLoading(false); }
+    } finally {
+      if (requestSequence === loadSequence.current) setLoading(false);
+    }
   }, [date]);
 
   useEffect(() => {
@@ -94,10 +102,11 @@ export default function Dashboard({ displayName, email }: { displayName: string;
     return () => window.clearInterval(interval);
   }, []);
   useEffect(() => {
-    if (!noteReady.current) return;
+    const selectedDate = isoDate(date);
+    if (!shouldAutosaveDailyNote(loadedNoteDate.current, selectedDate)) return;
     setSaveState("saving");
     const timeout = setTimeout(async () => {
-      const response = await fetch("/api/notes", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ noteDate: isoDate(date), title: noteTitle, content: noteContent }) });
+      const response = await fetch("/api/notes", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ noteDate: selectedDate, title: noteTitle, content: noteContent }) });
       setSaveState(response.ok ? "saved" : "failed");
     }, 700);
     return () => clearTimeout(timeout);
