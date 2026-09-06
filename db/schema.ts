@@ -30,6 +30,18 @@ export const dailyNotes = sqliteTable("daily_notes", {
   uniqueIndex("idx_notes_user_date").on(table.userId, table.noteDate),
 ]);
 
+export const categories = sqliteTable("categories", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: text("user_id").notNull(),
+  name: text("name").notNull(),
+  normalizedName: text("normalized_name").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("idx_categories_user_normalized_name").on(table.userId, table.normalizedName),
+]);
+
 export const calendarConnections = sqliteTable("calendar_connections", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: text("user_id").notNull(),

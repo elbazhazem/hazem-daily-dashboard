@@ -101,4 +101,14 @@ test("keeps dashboard controls responsive on narrow screens", async () => {
   assert.match(css, /grid-template-columns:44px minmax\(0,1fr\) 44px/);
   assert.match(css, /max-height:calc\(100dvh - 1rem\)/);
   assert.match(css, /\.analytics-kpis\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css, /\.category-create\{grid-template-columns:1fr\}/);
+});
+
+test("normalizes category names before duplicate checks", async () => {
+  const { normalizeCategoryName } = await vite.ssrLoadModule(
+    "/lib/categories.ts",
+  );
+
+  assert.equal(normalizeCategoryName("  Research   Work  "), "research work");
+  assert.equal(normalizeCategoryName("FOLLOW-UP"), "follow-up");
 });

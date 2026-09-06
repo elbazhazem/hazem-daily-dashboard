@@ -218,4 +218,34 @@ html,body{max-width:100%;overflow-x:hidden}
   .analytics-kpi{min-height:0;flex-direction:row;align-items:center}
   .analytics-section-nav button{align-items:flex-start}
 }
+
+/* Category management */
+.field-group{display:grid;gap:.35rem;font-size:.78rem;font-weight:700}
+.category-label-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+.category-label-row>button{border:0;padding:.25rem 0;display:inline-flex;align-items:center;gap:.3rem;color:var(--accent);background:transparent;font-size:.75rem;font-weight:750;cursor:pointer}
+.category-label-row>button svg{width:.9rem;height:.9rem}
+.field-group>select{border:1px solid var(--input);border-radius:10px;background:var(--background);color:inherit;padding:.62rem}
+.category-manager-backdrop{z-index:60}
+.category-manager{width:min(560px,100%)}
+.category-help{color:var(--muted-foreground);font-size:.82rem;line-height:1.5}
+.category-create{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.55rem;align-items:end}
+.category-create label{min-width:0}
+.category-create input,.category-row input{width:100%;border:1px solid var(--input);border-radius:10px;background:var(--background);color:inherit;padding:.62rem}
+.category-create .primary-button{min-height:42px}
+.category-error{padding:.65rem .75rem;border:1px solid color-mix(in srgb,var(--danger) 35%,var(--border));border-radius:10px;color:var(--danger);background:color-mix(in srgb,var(--danger) 8%,var(--background));font-size:.8rem;font-weight:650}
+.category-list{display:grid;gap:.45rem;max-height:min(360px,45vh);overflow:auto}
+.category-row{min-height:52px;padding:.5rem .6rem;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.6rem;border:1px solid var(--border);border-radius:12px;background:var(--background)}
+.category-row>span{font-size:.875rem;font-weight:750;overflow-wrap:anywhere}
+.category-actions{display:flex;align-items:center;gap:.35rem}
+.secondary-button.compact{padding:.5rem .7rem;font-size:.8rem}
+.category-row button:disabled{opacity:.45;cursor:not-allowed}
+
+@media(max-width:700px){
+  .field-group{font-size:.875rem}
+  .field-group>select{min-height:44px;font-size:1rem}
+  .category-create{grid-template-columns:1fr}
+  .category-create .primary-button{width:100%}
+  .category-row{grid-template-columns:1fr}
+  .category-actions{justify-content:flex-end}
+}
 @media print{.sidebar-toggle,.sidebar-overlay,.analytics-section-nav,.analytics-view-heading{display:none!important}.analytics-view{display:block!important;animation:none}.site-layout:has(.app-sidebar.closed) .analytics-topbar{padding-left:0}}

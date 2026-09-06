@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, format, isToday, parseISO } from "date-fns";
-import { CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, ExternalLink, Link2, ListTodo, LogOut, MapPin, Moon, NotebookPen, Pencil, Plus, RefreshCw, Search, Sun, Trash2, X } from "lucide-react";
+import { CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, ExternalLink, Link2, ListTodo, LogOut, MapPin, Moon, NotebookPen, Pencil, Plus, RefreshCw, Search, Sun, Tags, Trash2, X } from "lucide-react";
 import AppSidebar from "../components/app-sidebar";
+import { DEFAULT_CATEGORY_NAMES } from "../lib/categories";
 import { shouldAutosaveDailyNote } from "../lib/daily-notes";
 
 type Task = { id: number; title: string; description: string; taskDate: string; dueTime: string | null; priority: "high" | "medium" | "low"; status: "not_started" | "in_progress" | "completed"; category: string };
 type TaskStatus = Task["status"];
 type EventItem = { id: string; title: string; description: string | null; location: string | null; url: string | null; meetingUrl: string | null; start: string; end: string; allDay: boolean };
 type CalendarState = { connected: boolean; configured?: boolean; email?: string | null; events: EventItem[] };
+type Category = { id: number; name: string };
 
-const categories = ["Academic", "Research", "Teaching", "Administrative", "Personal", "Follow-up"];
+const fallbackCategories: Category[] = DEFAULT_CATEGORY_NAMES.map((name, index) => ({ id: -(index + 1), name }));
 const statusLabels: Record<TaskStatus, string> = { not_started: "Not started", in_progress: "In progress", completed: "Completed" };
 const priorityLabels: Record<Task["priority"], string> = { high: "High", medium: "Medium", low: "Low" };
 const priorityRank: Record<Task["priority"], number> = { high: 0, medium: 1, low: 2 };
@@ -39,6 +41,7 @@ export default function Dashboard({ displayName, email }: { displayName: string;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [calendar, setCalendar] = useState<CalendarState>({ connected: false, events: [] });
+  const [categories, setCategories] = useState<Category[]>(fallbackCategories);
   const [noteTitle, setNoteTitle] = useState("Daily notes");
   const [noteContent, setNoteContent] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
@@ -46,6 +49,7 @@ export default function Dashboard({ displayName, email }: { displayName: string;
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [greeting, setGreeting] = useState("Welcome");
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -92,6 +96,13 @@ export default function Dashboard({ displayName, email }: { displayName: string;
     const timer = window.setTimeout(() => { void loadDay(); }, 0);
     return () => window.clearTimeout(timer);
   }, [loadDay]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/categories", { signal: controller.signal }).then(async (response) => {
+      if (response.ok) setCategories((await response.json()).categories ?? fallbackCategories);
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -165,6 +176,36 @@ export default function Dashboard({ displayName, email }: { displayName: string;
     }
   }
 
+  async function categoryError(response: Response) {
+    const data = await response.json().catch(() => ({})) as { error?: string };
+    return data.error ?? "The category could not be saved.";
+  }
+
+  async function createCategory(name: string) {
+    const response = await fetch("/api/categories", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) });
+    if (!response.ok) return categoryError(response);
+    const data = await response.json() as { categories: Category[] };
+    setCategories(data.categories);
+    return null;
+  }
+
+  async function renameCategory(category: Category, name: string) {
+    const response = await fetch("/api/categories", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: category.id, name }) });
+    if (!response.ok) return categoryError(response);
+    const data = await response.json() as { category: Category; previousName: string };
+    setCategories((current) => current.map((item) => item.id === category.id ? data.category : item));
+    setTasks((current) => current.map((task) => task.category === data.previousName ? { ...task, category: data.category.name } : task));
+    setSelectedTask((current) => current?.category === data.previousName ? { ...current, category: data.category.name } : current);
+    return null;
+  }
+
+  async function deleteCategory(category: Category) {
+    const response = await fetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
+    if (!response.ok) return categoryError(response);
+    setCategories((current) => current.filter((item) => item.id !== category.id));
+    return null;
+  }
+
   const panels = {
     events: <EventsPanel events={events} calendar={calendar} loading={loading} onRefresh={loadDay} />,
     tasks: <TasksPanel tasks={visibleTasks} totalTasks={tasks.length} statusCounts={statusCounts} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} onStatusChange={(task, status) => updateTask(task, { status })} onToggle={(task) => updateTask(task, { status: task.status === "completed" ? "not_started" : "completed" })} onOpen={setSelectedTask} onDelete={removeTask} onAdd={() => setShowTaskForm(true)} />,
@@ -211,8 +252,9 @@ export default function Dashboard({ displayName, email }: { displayName: string;
         <div className="panel-slot notes-slot">{panels.notes}</div>
       </section>
 
-      {showTaskForm && <TaskDialog date={date} onClose={() => setShowTaskForm(false)} onSubmit={addTask} />}
-      {selectedTask && <TaskDetailDialog task={selectedTask} onClose={() => setSelectedTask(null)} onSave={(form) => saveTaskChanges(selectedTask, form)} onDelete={removeTask} />}
+      {showTaskForm && <TaskDialog date={date} categories={categories} onManageCategories={() => setShowCategoryManager(true)} onClose={() => setShowTaskForm(false)} onSubmit={addTask} />}
+      {selectedTask && <TaskDetailDialog task={selectedTask} categories={categories} onManageCategories={() => setShowCategoryManager(true)} onClose={() => setSelectedTask(null)} onSave={(form) => saveTaskChanges(selectedTask, form)} onDelete={removeTask} />}
+      {showCategoryManager && <CategoryManagerDialog categories={categories} onClose={() => setShowCategoryManager(false)} onCreate={createCategory} onRename={renameCategory} onDelete={deleteCategory} />}
       </main>
     </div>
   );
@@ -239,11 +281,16 @@ function NotesPanel({ title, content, setTitle, setContent, saveState }: { title
   return <section className="panel notes-panel"><PanelHeader icon={<NotebookPen />} title="Notes" action={<span className={`save-status ${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed" : saveState === "saved" ? "Saved" : ""}</span>} /><input className="note-title" value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Note title" /><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Write reflections, meeting summaries, or follow-up items…" aria-label="Daily notes" /><footer><span>{content.trim() ? content.trim().split(/\s+/).length : 0} words</span><span>Autosaved securely</span></footer></section>;
 }
 
-function TaskDialog({ date, onClose, onSubmit }: { date: Date; onClose: () => void; onSubmit: (form: FormData) => void }) {
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="task-dialog" action={onSubmit}><header><div><p>New task</p><h2>{format(date, "EEEE, d MMMM")}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X /></button></header><label>Task title<input name="title" required maxLength={180} autoFocus placeholder="e.g. Review research proposal" /></label><label>Description<textarea name="description" rows={3} placeholder="Optional details" /></label><div className="form-grid"><label>Due time<input name="dueTime" type="time" /></label><label>Priority<select name="priority" defaultValue="medium"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div><label>Category<select name="category" defaultValue="Academic">{categories.map((category) => <option key={category}>{category}</option>)}</select></label><button className="primary-button" type="submit"><Plus />Add task</button></form></div>;
+function CategoryField({ categories, defaultValue, onManageCategories }: { categories: Category[]; defaultValue?: string; onManageCategories: () => void }) {
+  const choices = defaultValue && !categories.some((category) => category.name === defaultValue) ? [{ id: -1, name: defaultValue }, ...categories] : categories;
+  return <div className="field-group"><div className="category-label-row"><span>Category</span><button type="button" onClick={onManageCategories}><Tags />Manage categories</button></div><select name="category" defaultValue={defaultValue ?? choices[0]?.name} required>{choices.map((category) => <option key={`${category.id}-${category.name}`} value={category.name}>{category.name}</option>)}</select></div>;
 }
 
-function TaskDetailDialog({ task, onClose, onSave, onDelete }: { task: Task; onClose: () => void; onSave: (form: FormData) => Promise<boolean>; onDelete: (id: number) => Promise<void> }) {
+function TaskDialog({ date, categories, onManageCategories, onClose, onSubmit }: { date: Date; categories: Category[]; onManageCategories: () => void; onClose: () => void; onSubmit: (form: FormData) => void }) {
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="task-dialog" action={onSubmit}><header><div><p>New task</p><h2>{format(date, "EEEE, d MMMM")}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X /></button></header><label>Task title<input name="title" required maxLength={180} autoFocus placeholder="e.g. Review research proposal" /></label><label>Description<textarea name="description" rows={3} placeholder="Optional details" /></label><div className="form-grid"><label>Due time<input name="dueTime" type="time" /></label><label>Priority<select name="priority" defaultValue="medium"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div><CategoryField categories={categories} onManageCategories={onManageCategories} /><button className="primary-button" type="submit"><Plus />Add task</button></form></div>;
+}
+
+function TaskDetailDialog({ task, categories, onManageCategories, onClose, onSave, onDelete }: { task: Task; categories: Category[]; onManageCategories: () => void; onClose: () => void; onSave: (form: FormData) => Promise<boolean>; onDelete: (id: number) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -265,7 +312,7 @@ function TaskDetailDialog({ task, onClose, onSave, onDelete }: { task: Task; onC
       <label>Task title<input name="title" required maxLength={180} autoFocus defaultValue={task.title} /></label>
       <label>Description<textarea name="description" rows={5} defaultValue={task.description} placeholder="Add the steps or outcome required for this task" /></label>
       <div className="form-grid"><label>Due time<input name="dueTime" type="time" defaultValue={task.dueTime ?? ""} /></label><label>Priority<select name="priority" defaultValue={task.priority}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div>
-      <label>Category<select name="category" defaultValue={task.category}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
+      <CategoryField categories={categories} defaultValue={task.category} onManageCategories={onManageCategories} />
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : "Save changes"}</button></div>
     </form> : <section className="task-dialog task-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="task-detail-title">
       <header><div><p>Task details</p><h2 id="task-detail-title">{task.title}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X /></button></header>
@@ -274,4 +321,37 @@ function TaskDetailDialog({ task, onClose, onSave, onDelete }: { task: Task; onC
       <div className="dialog-actions detail-actions"><button type="button" className="danger-button" onClick={deleteTask}><Trash2 />Delete</button><button type="button" className="primary-button" onClick={() => setEditing(true)}><Pencil />Edit task</button></div>
     </section>}
   </div>;
+}
+
+function CategoryManagerDialog({ categories, onClose, onCreate, onRename, onDelete }: { categories: Category[]; onClose: () => void; onCreate: (name: string) => Promise<string | null>; onRename: (category: Category, name: string) => Promise<string | null>; onDelete: (category: Category) => Promise<string | null> }) {
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+
+  async function add(event: React.FormEvent) {
+    event.preventDefault(); setWorking(true); setError("");
+    const message = await onCreate(newName);
+    setWorking(false);
+    if (message) setError(message); else setNewName("");
+  }
+
+  async function save(category: Category) {
+    setWorking(true); setError("");
+    const message = await onRename(category, editingName);
+    setWorking(false);
+    if (message) setError(message); else setEditingId(null);
+  }
+
+  async function remove(category: Category) {
+    if (!window.confirm(`Delete “${category.name}” from future category choices? Existing tasks will keep this label.`)) return;
+    setWorking(true); setError("");
+    const message = await onDelete(category);
+    setWorking(false);
+    if (message) setError(message);
+  }
+
+  const managedCategories = categories.filter((category) => category.id > 0);
+  return <div className="dialog-backdrop category-manager-backdrop"><section className="task-dialog category-manager" role="dialog" aria-modal="true" aria-labelledby="category-manager-title"><header><div><p>Task settings</p><h2 id="category-manager-title">Manage categories</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close category manager"><X /></button></header><p className="category-help">Create categories for future tasks. Renaming updates matching tasks; deleting only removes the category from future choices.</p><form className="category-create" onSubmit={add}><label><span>New category</span><input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={50} required placeholder="e.g. Consulting" /></label><button className="primary-button" type="submit" disabled={working}><Plus />Add</button></form>{error && <p className="category-error" role="alert">{error}</p>}<div className="category-list">{managedCategories.map((category) => <div className="category-row" key={category.id}>{editingId === category.id ? <><input value={editingName} onChange={(event) => setEditingName(event.target.value)} maxLength={50} aria-label={`Rename ${category.name}`} /><div className="category-actions"><button type="button" className="primary-button compact" onClick={() => void save(category)} disabled={working}>Save</button><button type="button" className="secondary-button compact" onClick={() => setEditingId(null)}>Cancel</button></div></> : <><span>{category.name}</span><div className="category-actions"><button type="button" className="icon-button small" onClick={() => { setEditingId(category.id); setEditingName(category.name); setError(""); }} aria-label={`Rename ${category.name}`}><Pencil /></button><button type="button" className="icon-button small danger" onClick={() => void remove(category)} disabled={working || managedCategories.length <= 1} aria-label={`Delete ${category.name}`}><Trash2 /></button></div></>}</div>)}</div></section></div>;
 }
