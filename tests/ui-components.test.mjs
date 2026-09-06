@@ -93,3 +93,12 @@ test("autosaves notes only to the day whose note is loaded", async () => {
   assert.equal(shouldAutosaveDailyNote("2026-09-06", "2026-09-07"), false);
   assert.equal(shouldAutosaveDailyNote(null, "2026-09-07"), false);
 });
+
+test("keeps dashboard controls responsive on narrow screens", async () => {
+  const css = await readFile(path.join(root, "app/globals.css"), "utf8");
+
+  assert.match(css, /html,body\{max-width:100%;overflow-x:hidden\}/);
+  assert.match(css, /grid-template-columns:44px minmax\(0,1fr\) 44px/);
+  assert.match(css, /max-height:calc\(100dvh - 1rem\)/);
+  assert.match(css, /\.analytics-kpis\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+});
