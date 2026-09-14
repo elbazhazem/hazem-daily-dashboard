@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, lt, ne } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { tasks } from "../../../../db/schema";
 import { apiError, requireUserId } from "../../_shared";
@@ -19,9 +19,12 @@ export async function POST(request: Request) {
       return Response.json({ error: "Tasks can only roll into the following day." }, { status: 400 });
     }
 
+    // Move every unfinished task that is still parked on an earlier day. Limiting
+    // this update to sourceDate strands tasks whenever the dashboard is not opened
+    // for one or more days (for example, a task on Sep 10 opened again on Sep 12).
     const moved = await getDb().update(tasks)
       .set({ taskDate: targetDate, updatedAt: new Date().toISOString() })
-      .where(and(eq(tasks.userId, userId), eq(tasks.taskDate, sourceDate), ne(tasks.status, "completed")))
+      .where(and(eq(tasks.userId, userId), lt(tasks.taskDate, targetDate), ne(tasks.status, "completed")))
       .returning({ id: tasks.id });
 
     return Response.json({ moved: moved.length });

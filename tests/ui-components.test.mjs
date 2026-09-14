@@ -112,3 +112,14 @@ test("normalizes category names before duplicate checks", async () => {
   assert.equal(normalizeCategoryName("  Research   Work  "), "research work");
   assert.equal(normalizeCategoryName("FOLLOW-UP"), "follow-up");
 });
+
+test("rolls all unfinished tasks from earlier dates into today", async () => {
+  const source = await readFile(
+    path.join(root, "app/api/tasks/rollover/route.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /lt\(tasks\.taskDate, targetDate\)/);
+  assert.match(source, /ne\(tasks\.status, "completed"\)/);
+  assert.doesNotMatch(source, /eq\(tasks\.taskDate, sourceDate\)/);
+});
