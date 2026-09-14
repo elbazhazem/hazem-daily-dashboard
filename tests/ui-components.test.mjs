@@ -113,13 +113,27 @@ test("normalizes category names before duplicate checks", async () => {
   assert.equal(normalizeCategoryName("FOLLOW-UP"), "follow-up");
 });
 
-test("rolls all unfinished tasks from earlier dates into today", async () => {
+test("rollover keeps the source day and copies only unfinished tasks", async () => {
   const source = await readFile(
     path.join(root, "app/api/tasks/rollover/route.ts"),
     "utf8",
   );
 
-  assert.match(source, /lt\(tasks\.taskDate, targetDate\)/);
+  assert.match(source, /insert\(tasks\)/);
+  assert.match(source, /eq\(tasks\.taskDate, sourceDate\)/);
   assert.match(source, /ne\(tasks\.status, "completed"\)/);
-  assert.doesNotMatch(source, /eq\(tasks\.taskDate, sourceDate\)/);
+  assert.doesNotMatch(source, /update\(tasks\)/);
+});
+
+test("builds every missing calendar date for history repair", async () => {
+  const { dateRangeInclusive } = await vite.ssrLoadModule(
+    "/lib/task-rollover.ts",
+  );
+
+  assert.deepEqual(dateRangeInclusive("2026-09-10", "2026-09-13"), [
+    "2026-09-10",
+    "2026-09-11",
+    "2026-09-12",
+    "2026-09-13",
+  ]);
 });
