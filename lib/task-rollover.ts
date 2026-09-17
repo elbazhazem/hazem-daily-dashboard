@@ -4,10 +4,37 @@ export function addUtcDays(date: string, days: number) {
   return value.toISOString().slice(0, 10);
 }
 
-export function dateRangeInclusive(startDate: string, endDate: string) {
-  const dates: string[] = [];
-  for (let date = startDate; date <= endDate; date = addUtcDays(date, 1)) {
-    dates.push(date);
+type RolloverTask = {
+  id: number;
+  createdAt: string;
+  taskDate: string;
+  status: "not_started" | "in_progress" | "completed";
+};
+
+export function planTaskRollover(rows: RolloverTask[], targetDate: string) {
+  const byLineage = new Map<string, RolloverTask[]>();
+
+  for (const row of rows) {
+    const lineage = byLineage.get(row.createdAt) ?? [];
+    lineage.push(row);
+    byLineage.set(row.createdAt, lineage);
   }
-  return dates;
+
+  const duplicateIds: number[] = [];
+  const moveIds: number[] = [];
+
+  for (const lineage of byLineage.values()) {
+    const newestFirst = [...lineage].sort((a, b) =>
+      b.taskDate.localeCompare(a.taskDate) || b.id - a.id,
+    );
+    const completed = newestFirst.find((task) => task.status === "completed");
+    const canonical = completed ?? newestFirst[0];
+
+    duplicateIds.push(...newestFirst.filter((task) => task.id !== canonical.id).map((task) => task.id));
+    if (canonical.status !== "completed" && canonical.taskDate < targetDate) {
+      moveIds.push(canonical.id);
+    }
+  }
+
+  return { duplicateIds, moveIds };
 }
