@@ -141,3 +141,20 @@ test("plans catch-up rollover without duplicating completed work", async () => {
   assert.deepEqual(plan.moveIds, [2, 3]);
   assert.deepEqual(plan.duplicateIds, [1, 4]);
 });
+
+test("calculates explainable weekly review metrics and advice", async () => {
+  const { buildWeeklyReview } = await vite.ssrLoadModule("/lib/weekly-review.ts");
+  const tasks = [
+    { id: 1, title: "Research draft", taskDate: "2026-09-14", priority: "high", status: "completed", category: "Research", createdAt: "2026-09-14T08:00:00Z", completedAt: "2026-09-14T12:00:00Z" },
+    { id: 2, title: "Admin approval", taskDate: "2026-09-15", priority: "medium", status: "in_progress", category: "Administration", createdAt: "2026-09-10T08:00:00Z", completedAt: null },
+  ];
+  const notes = [{ noteDate: "2026-09-14", content: "Completed the research draft. Waiting for administrative approval." }];
+  const review = buildWeeklyReview(tasks, notes, [], "2026-09-14", "2026-09-20", "2026-09-17");
+
+  assert.equal(review.metrics.completionRate, 50);
+  assert.equal(review.metrics.strategicProgress, 60);
+  assert.equal(review.metrics.rolloverRate, 50);
+  assert.match(review.insights.blocker, /Waiting/i);
+  assert.match(review.actionPlan.improve, /carry-over/i);
+  assert.equal(review.methodology.length, 5);
+});

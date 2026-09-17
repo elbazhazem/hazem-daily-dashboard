@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BarChart3, CheckCircle2, LayoutDashboard, Menu, X } from "lucide-react";
+import { BarChart3, CalendarCheck2, CheckCircle2, LayoutDashboard, Menu, X } from "lucide-react";
 import Link from "next/link";
 
-export default function AppSidebar({ active }: { active: "dashboard" | "analytics" }) {
+export default function AppSidebar({ active }: { active: "dashboard" | "analytics" | "weekly" }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -45,6 +45,9 @@ export default function AppSidebar({ active }: { active: "dashboard" | "analytic
           </Link>
           <Link className={active === "analytics" ? "active" : ""} href="/analytics" aria-current={active === "analytics" ? "page" : undefined} tabIndex={open ? 0 : -1}>
             <BarChart3 /><span>Analytics &amp; Reports</span>
+          </Link>
+          <Link className={active === "weekly" ? "active" : ""} href="/weekly-review" aria-current={active === "weekly" ? "page" : undefined} tabIndex={open ? 0 : -1}>
+            <CalendarCheck2 /><span>Weekly Review</span>
           </Link>
         </nav>
         <div className="sidebar-foot">
