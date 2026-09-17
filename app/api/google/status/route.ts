@@ -1,13 +1,20 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { calendarConnections } from "../../../../db/schema";
-import { apiError, requireUserId } from "../../_shared";
+import { apiError, hasCalendarWriteScope, requireUserId } from "../../_shared";
 
 export async function GET() {
   try {
     const userId = await requireUserId();
     const connection = await getDb().query.calendarConnections.findFirst({ where: eq(calendarConnections.userId, userId) });
-    return Response.json({ connected: Boolean(connection), email: connection?.accountEmail ?? null, configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_REDIRECT_URI) });
+    const canCreateEvents = hasCalendarWriteScope(connection?.scope);
+    return Response.json({
+      connected: Boolean(connection),
+      email: connection?.accountEmail ?? null,
+      configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_REDIRECT_URI),
+      canCreateEvents,
+      reconnectRequired: Boolean(connection) && !canCreateEvents,
+    });
   } catch (error) { return apiError(error); }
 }
 

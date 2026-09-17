@@ -4,13 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, format, isToday, parseISO } from "date-fns";
 import { CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, ExternalLink, Link2, ListTodo, LogOut, MapPin, Moon, NotebookPen, Pencil, Plus, RefreshCw, Search, Sun, Tags, Trash2, X } from "lucide-react";
 import AppSidebar from "../components/app-sidebar";
+import DetectedActions from "../components/detected-actions";
 import { DEFAULT_CATEGORY_NAMES } from "../lib/categories";
 import { shouldAutosaveDailyNote } from "../lib/daily-notes";
 
 type Task = { id: number; title: string; description: string; taskDate: string; dueTime: string | null; priority: "high" | "medium" | "low"; status: "not_started" | "in_progress" | "completed"; category: string };
 type TaskStatus = Task["status"];
 type EventItem = { id: string; title: string; description: string | null; location: string | null; url: string | null; meetingUrl: string | null; start: string; end: string; allDay: boolean };
-type CalendarState = { connected: boolean; configured?: boolean; email?: string | null; events: EventItem[] };
+type CalendarState = { connected: boolean; configured?: boolean; email?: string | null; canCreateEvents?: boolean; reconnectRequired?: boolean; events: EventItem[] };
 type Category = { id: number; name: string };
 
 const fallbackCategories: Category[] = DEFAULT_CATEGORY_NAMES.map((name, index) => ({ id: -(index + 1), name }));
@@ -44,6 +45,8 @@ export default function Dashboard({ displayName, email }: { displayName: string;
   const [categories, setCategories] = useState<Category[]>(fallbackCategories);
   const [noteTitle, setNoteTitle] = useState("Daily notes");
   const [noteContent, setNoteContent] = useState("");
+  const [savedNoteContent, setSavedNoteContent] = useState("");
+  const [noteAnalysisVersion, setNoteAnalysisVersion] = useState(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -79,6 +82,9 @@ export default function Dashboard({ displayName, email }: { displayName: string;
         loadedNoteDate.current = null;
         setNoteTitle(note?.title ?? "Daily notes");
         setNoteContent(note?.content ?? "");
+        setSavedNoteContent(note?.content ?? "");
+        setNoteAnalysisVersion((current) => current + 1);
+        setSaveState("idle");
         setTimeout(() => {
           if (requestSequence === loadSequence.current) loadedNoteDate.current = day;
         }, 0);
@@ -118,7 +124,13 @@ export default function Dashboard({ displayName, email }: { displayName: string;
     setSaveState("saving");
     const timeout = setTimeout(async () => {
       const response = await fetch("/api/notes", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ noteDate: selectedDate, title: noteTitle, content: noteContent }) });
-      setSaveState(response.ok ? "saved" : "failed");
+      if (response.ok) {
+        setSaveState("saved");
+        setSavedNoteContent(noteContent);
+        setNoteAnalysisVersion((current) => current + 1);
+      } else {
+        setSaveState("failed");
+      }
     }, 700);
     return () => clearTimeout(timeout);
   }, [noteTitle, noteContent, date]);
@@ -143,6 +155,18 @@ export default function Dashboard({ displayName, email }: { displayName: string;
       setTasks((current) => sortTasksByImportance([...current, created]));
       setShowTaskForm(false);
     }
+  }
+
+  async function refreshCalendar() {
+    const day = isoDate(date);
+    const [calendarResponse, statusResponse] = await Promise.all([
+      fetch(`/api/calendar?date=${day}`),
+      fetch("/api/google/status"),
+    ]);
+    const status = statusResponse.ok ? await statusResponse.json() : { connected: false, configured: false };
+    const calendarData = calendarResponse.ok ? await calendarResponse.json() : { connected: false, events: [] };
+    setCalendar({ ...status, ...calendarData });
+    setEvents(calendarData.events ?? []);
   }
 
   async function updateTask(task: Task, changes: Partial<Task>) {
@@ -209,7 +233,25 @@ export default function Dashboard({ displayName, email }: { displayName: string;
   const panels = {
     events: <EventsPanel events={events} calendar={calendar} loading={loading} onRefresh={loadDay} />,
     tasks: <TasksPanel tasks={visibleTasks} totalTasks={tasks.length} statusCounts={statusCounts} query={query} setQuery={setQuery} statusFilter={statusFilter} setStatusFilter={setStatusFilter} onStatusChange={(task, status) => updateTask(task, { status })} onToggle={(task) => updateTask(task, { status: task.status === "completed" ? "not_started" : "completed" })} onOpen={setSelectedTask} onDelete={removeTask} onAdd={() => setShowTaskForm(true)} />,
-    notes: <NotesPanel title={noteTitle} content={noteContent} setTitle={setNoteTitle} setContent={setNoteContent} saveState={saveState} />,
+    notes: <NotesPanel
+      title={noteTitle}
+      content={noteContent}
+      setTitle={setNoteTitle}
+      setContent={setNoteContent}
+      saveState={saveState}
+      detectedActions={<DetectedActions
+        key={`${isoDate(date)}-${noteAnalysisVersion}`}
+        noteDate={isoDate(date)}
+        savedContent={savedNoteContent}
+        categories={categories}
+        calendarCanCreateEvents={Boolean(calendar.canCreateEvents)}
+        calendarConfigured={calendar.configured !== false}
+        onTaskCreated={(task) => {
+          if (task.taskDate === isoDate(date)) setTasks((current) => sortTasksByImportance([...current, task as Task]));
+        }}
+        onCalendarCreated={() => { void refreshCalendar(); }}
+      />}
+    />,
   };
 
   return (
@@ -266,7 +308,7 @@ function PanelHeader({ icon, title, count, action }: { icon: React.ReactNode; ti
 
 function EventsPanel({ events, calendar, loading, onRefresh }: { events: EventItem[]; calendar: CalendarState; loading: boolean; onRefresh: () => void }) {
   return <section className="panel"><PanelHeader icon={<CalendarDays />} title="Calendar" count={events.length} action={<button className="icon-button small" onClick={onRefresh} aria-label="Refresh calendar"><RefreshCw className={loading ? "spin" : ""} /></button>} />
-    {!calendar.connected ? <div className="empty-state"><div className="empty-icon"><Link2 /></div><strong>Connect Google Calendar</strong><p>{calendar.configured === false ? "Calendar credentials need to be configured by the site owner." : "Read-only access keeps your schedule synchronized."}</p>{calendar.configured !== false && <a className="primary-button" href="/api/google/connect">Connect calendar</a>}</div> : events.length === 0 ? <div className="empty-state compact"><strong>No events today</strong><p>Your calendar is clear for this date.</p></div> : <div className="event-list">{events.map((event) => <article className="event-card" key={event.id}><div className="event-time">{event.allDay ? <><strong>ALL</strong><span>DAY</span></> : <><strong>{format(new Date(event.start), "h:mm")}</strong><span>{format(new Date(event.start), "a")}</span></>}</div><div className="event-detail"><strong>{event.title}</strong>{event.location && <span><MapPin />{event.location}</span>}{event.meetingUrl && <a href={event.meetingUrl} target="_blank" rel="noreferrer"><Link2 />Join meeting</a>}</div>{event.url && <a className="icon-button small" href={event.url} target="_blank" rel="noreferrer" aria-label="Open in Google Calendar"><ExternalLink /></a>}</article>)}</div>}
+    {!calendar.connected ? <div className="empty-state"><div className="empty-icon"><Link2 /></div><strong>Connect Google Calendar</strong><p>{calendar.configured === false ? "Calendar credentials need to be configured by the site owner." : "Connect to read your schedule and create confirmed events."}</p>{calendar.configured !== false && <a className="primary-button" href="/api/google/connect">Connect calendar</a>}</div> : events.length === 0 ? <div className="empty-state compact"><strong>No events today</strong><p>Your calendar is clear for this date.</p></div> : <div className="event-list">{events.map((event) => <article className="event-card" key={event.id}><div className="event-time">{event.allDay ? <><strong>ALL</strong><span>DAY</span></> : <><strong>{format(new Date(event.start), "h:mm")}</strong><span>{format(new Date(event.start), "a")}</span></>}</div><div className="event-detail"><strong>{event.title}</strong>{event.location && <span><MapPin />{event.location}</span>}{event.meetingUrl && <a href={event.meetingUrl} target="_blank" rel="noreferrer"><Link2 />Join meeting</a>}</div>{event.url && <a className="icon-button small" href={event.url} target="_blank" rel="noreferrer" aria-label="Open in Google Calendar"><ExternalLink /></a>}</article>)}</div>}
   </section>;
 }
 
@@ -277,8 +319,8 @@ function TasksPanel({ tasks, totalTasks, statusCounts, query, setQuery, statusFi
   </section>;
 }
 
-function NotesPanel({ title, content, setTitle, setContent, saveState }: { title: string; content: string; setTitle: (value: string) => void; setContent: (value: string) => void; saveState: string }) {
-  return <section className="panel notes-panel"><PanelHeader icon={<NotebookPen />} title="Notes" action={<span className={`save-status ${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed" : saveState === "saved" ? "Saved" : ""}</span>} /><input className="note-title" value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Note title" /><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Write reflections, meeting summaries, or follow-up items…" aria-label="Daily notes" /><footer><span>{content.trim() ? content.trim().split(/\s+/).length : 0} words</span><span>Autosaved securely</span></footer></section>;
+function NotesPanel({ title, content, setTitle, setContent, saveState, detectedActions }: { title: string; content: string; setTitle: (value: string) => void; setContent: (value: string) => void; saveState: string; detectedActions: React.ReactNode }) {
+  return <section className="panel notes-panel"><PanelHeader icon={<NotebookPen />} title="Notes" action={<span className={`save-status ${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed" : saveState === "saved" ? "Saved" : ""}</span>} /><input className="note-title" value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Note title" /><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Write reflections, meeting summaries, or follow-up items…" aria-label="Daily notes" /><footer><span>{content.trim() ? content.trim().split(/\s+/).length : 0} words</span><span>Autosaved securely</span></footer>{detectedActions}</section>;
 }
 
 function CategoryField({ categories, defaultValue, onManageCategories }: { categories: Category[]; defaultValue?: string; onManageCategories: () => void }) {

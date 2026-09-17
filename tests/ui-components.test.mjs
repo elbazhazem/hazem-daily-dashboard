@@ -158,3 +158,123 @@ test("calculates explainable weekly review metrics and advice", async () => {
   assert.match(review.actionPlan.improve, /carry-over/i);
   assert.equal(review.methodology.length, 5);
 });
+
+test("extracts the Arabic Ibrahim meeting relative to the note date", async () => {
+  const { extractNoteActions, canCreateCalendarEvent, canCreateTask } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions(
+    "2026-09-17",
+    "اتفقت أمس مع إبراهيم شبايطة على لقاء أونلاين يوم الجمعة الساعة 3 عصراً لمناقشة المشروع.",
+    ["Academic", "Meetings"],
+  );
+  assert.equal(candidate.type, "meeting");
+  assert.equal(candidate.person, "إبراهيم شبايطة");
+  assert.equal(candidate.date, "2026-09-18");
+  assert.equal(candidate.time, "15:00");
+  assert.equal(candidate.durationMinutes, 60);
+  assert.equal(candidate.durationDefaulted, true);
+  assert.equal(candidate.location, "Online");
+  assert.equal(candidate.category, "Meetings");
+  assert.equal(candidate.confidence, "high");
+  assert.equal(canCreateTask(candidate), true);
+  assert.equal(canCreateCalendarEvent(candidate), true);
+});
+
+test("extracts an English meeting and explicit duration", async () => {
+  const { extractNoteActions } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-17", "Meeting with Sarah Ahmed on Friday at 3 PM for 90 minutes online to discuss the proposal.");
+  assert.equal(candidate.person, "Sarah Ahmed");
+  assert.equal(candidate.date, "2026-09-18");
+  assert.equal(candidate.time, "15:00");
+  assert.equal(candidate.durationMinutes, 90);
+  assert.match(candidate.description, /proposal/i);
+});
+
+test("resolves Arabic tomorrow from note_date", async () => {
+  const { extractNoteActions } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-17", "لدي لقاء غداً الساعة 10 صباحاً.");
+  assert.equal(candidate.date, "2026-09-18");
+  assert.equal(candidate.time, "10:00");
+  assert.equal(candidate.dateSource, "inferred");
+});
+
+test("resolves day after tomorrow and Arabic word hours", async () => {
+  const { extractNoteActions } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-17", "لدي اجتماع بعد غد الساعة الثالثة عصراً.");
+  assert.equal(candidate.date, "2026-09-19");
+  assert.equal(candidate.time, "15:00");
+});
+
+test("uses the following week when a weekday matches note_date", async () => {
+  const { extractNoteActions } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-18", "لدي لقاء يوم الجمعة الساعة 15:00.");
+  assert.equal(candidate.date, "2026-09-25");
+});
+
+test("extracts a standalone task without creating a meeting", async () => {
+  const { extractNoteActions, canCreateCalendarEvent, canCreateTask } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-17", "تذكير بإرسال تقرير المشروع غداً.");
+  assert.equal(candidate.type, "task");
+  assert.equal(candidate.date, "2026-09-18");
+  assert.equal(canCreateTask(candidate), true);
+  assert.equal(canCreateCalendarEvent(candidate), false);
+});
+
+test("blocks tentative plans until they are confirmed", async () => {
+  const { extractNoteActions, canCreateCalendarEvent } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-17", "ربما لدي لقاء مع إبراهيم يوم الجمعة الساعة 3 عصراً.");
+  assert.equal(candidate.tentative, true);
+  assert.equal(candidate.confidence, "needs_clarification");
+  assert.equal(canCreateCalendarEvent(candidate), false);
+  assert.equal(canCreateCalendarEvent({ ...candidate, confirmed: true }), true);
+});
+
+test("reports missing meeting date and time", async () => {
+  const { extractNoteActions, canCreateCalendarEvent } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-17", "لدي لقاء مع إبراهيم لمناقشة المشروع.");
+  assert.deepEqual(candidate.missingFields.sort(), ["date", "time"]);
+  assert.equal(canCreateCalendarEvent(candidate), false);
+});
+
+test("supports explicit English and Arabic commands", async () => {
+  const { extractNoteActions } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const candidates = extractNoteActions("2026-09-17", [
+    "@schedule Online meeting with Ibrahim Shubaita | 2026-09-18 | 15:00 | 60m | Online",
+    "@مهمة إرسال التقرير | 2026-09-19 | 09:30 | عالية | Research",
+  ].join("\n"));
+  assert.equal(candidates.length, 2);
+  assert.equal(candidates[0].confidence, "high");
+  assert.equal(candidates[0].durationMinutes, 60);
+  assert.equal(candidates[1].type, "task");
+  assert.equal(candidates[1].priority, "high");
+  assert.equal(candidates[1].category, "Research");
+});
+
+test("parses Arabic duration explicitly", async () => {
+  const { extractNoteActions } = await vite.ssrLoadModule("/lib/note-actions.ts");
+  const [candidate] = extractNoteActions("2026-09-17", "اجتماع يوم الجمعة الساعة 3 عصراً لمدة 45 دقيقة.");
+  assert.equal(candidate.durationMinutes, 45);
+  assert.equal(candidate.durationDefaulted, false);
+});
+
+test("keeps action creation idempotent in tasks and Google Calendar", async () => {
+  const source = await readFile(path.join(root, "app/api/actions/route.ts"), "utf8");
+  assert.match(source, /findFirst/);
+  assert.match(source, /eq\(tasks\.title, title\)/);
+  assert.match(source, /privateExtendedProperty/);
+  assert.match(source, /hazemDashboardId/);
+});
+
+test("requests Calendar event access and reports reauthorization", async () => {
+  const connect = await readFile(path.join(root, "app/api/google/connect/route.ts"), "utf8");
+  const status = await readFile(path.join(root, "app/api/google/status/route.ts"), "utf8");
+  assert.match(connect, /calendar\.events/);
+  assert.match(status, /reconnectRequired/);
+  assert.doesNotMatch(connect, /calendar\.readonly/);
+});
+
+test("renders responsive detected-action controls", async () => {
+  const css = await readFile(path.join(root, "app/globals.css"), "utf8");
+  assert.match(css, /\.detected-actions/);
+  assert.match(css, /\.detected-fields\{grid-template-columns:1fr\}/);
+  assert.match(css, /\.detected-action-buttons\{display:grid;grid-template-columns:1fr\}/);
+});

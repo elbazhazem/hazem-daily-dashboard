@@ -13,7 +13,7 @@ export async function getValidGoogleToken(userId: string) {
   const db = getDb();
   const connection = await db.query.calendarConnections.findFirst({ where: eq(calendarConnections.userId, userId) });
   if (!connection) return null;
-  if (connection.tokenExpiry > Date.now() + 60_000) return { token: await decrypt(connection.encryptedAccessToken), email: connection.accountEmail };
+  if (connection.tokenExpiry > Date.now() + 60_000) return { token: await decrypt(connection.encryptedAccessToken), email: connection.accountEmail, scope: connection.scope };
   if (!connection.encryptedRefreshToken) return null;
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -32,7 +32,13 @@ export async function getValidGoogleToken(userId: string) {
     tokenExpiry: Date.now() + data.expires_in * 1000,
     updatedAt: new Date().toISOString(),
   }).where(eq(calendarConnections.userId, userId));
-  return { token: data.access_token, email: connection.accountEmail };
+  return { token: data.access_token, email: connection.accountEmail, scope: connection.scope };
+}
+
+export function hasCalendarWriteScope(scope: string | null | undefined) {
+  const granted = new Set((scope ?? "").split(/\s+/).filter(Boolean));
+  return granted.has("https://www.googleapis.com/auth/calendar.events")
+    || granted.has("https://www.googleapis.com/auth/calendar");
 }
 
 export function apiError(error: unknown) {

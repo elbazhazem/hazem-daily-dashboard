@@ -46,7 +46,7 @@ export async function GET(request: Request) {
       encryptedAccessToken: await encrypt(token.access_token),
       encryptedRefreshToken: token.refresh_token ? await encrypt(token.refresh_token) : existing?.encryptedRefreshToken ?? null,
       tokenExpiry: Date.now() + token.expires_in * 1000,
-      scope: token.scope ?? "https://www.googleapis.com/auth/calendar.readonly",
+      scope: token.scope ?? "https://www.googleapis.com/auth/calendar.events",
       updatedAt: now,
     };
     if (existing) await db.update(calendarConnections).set(values).where(eq(calendarConnections.id, existing.id));
