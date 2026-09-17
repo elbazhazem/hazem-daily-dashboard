@@ -1,47 +1,8 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { tasks } from "../../../../db/schema";
-import { addUtcDays, dateRangeInclusive } from "../../../../lib/task-rollover";
+import { addUtcDays, planTaskRollover } from "../../../../lib/task-rollover";
 import { apiError, requireUserId } from "../../_shared";
-
-const HISTORY_REPAIR_START = "2026-09-10";
-const HISTORY_REPAIR_TARGET = "2026-09-14";
-
-type TaskRow = typeof tasks.$inferSelect;
-
-function copyValues(task: TaskRow, taskDate: string, updatedAt: string) {
-  return {
-    userId: task.userId,
-    title: task.title,
-    description: task.description,
-    taskDate,
-    dueTime: task.dueTime,
-    priority: task.priority,
-    status: task.status,
-    category: task.category,
-    sortOrder: task.sortOrder,
-    completedAt: null,
-    createdAt: task.createdAt,
-    updatedAt,
-  };
-}
-
-async function copyMissingTasks(
-  sourceRows: TaskRow[],
-  targetDate: string,
-  userId: string,
-  updatedAt: string,
-) {
-  const db = getDb();
-  const targetRows = await db.select({ createdAt: tasks.createdAt }).from(tasks)
-    .where(and(eq(tasks.userId, userId), eq(tasks.taskDate, targetDate)));
-  const existing = new Set(targetRows.map((task) => task.createdAt));
-  const missing = sourceRows.filter((task) => !existing.has(task.createdAt));
-  if (missing.length) {
-    await db.insert(tasks).values(missing.map((task) => copyValues(task, targetDate, updatedAt)));
-  }
-  return missing.length;
-}
 
 export async function POST(request: Request) {
   try {
@@ -59,27 +20,31 @@ export async function POST(request: Request) {
 
     const db = getDb();
     const now = new Date().toISOString();
-    let repaired = 0;
 
-    // Version 14 moved these rows into Sep 14. Recreate the missing daily history
-    // once, without changing the current rows or duplicating an existing snapshot.
-    if (targetDate === HISTORY_REPAIR_TARGET) {
-      const currentOpenTasks = await db.select().from(tasks)
-        .where(and(eq(tasks.userId, userId), eq(tasks.taskDate, targetDate), ne(tasks.status, "completed")));
-      for (const repairDate of dateRangeInclusive(HISTORY_REPAIR_START, sourceDate)) {
-        const eligible = currentOpenTasks.filter((task) => task.createdAt.slice(0, 10) <= repairDate);
-        repaired += await copyMissingTasks(eligible, repairDate, userId, now);
-      }
+    // Move unfinished work instead of taking daily snapshots. Include every older
+    // date so opening the dashboard after several days still catches up correctly.
+    // createdAt is the lineage key used by the former copy-based implementation;
+    // collapsing those historical copies also repairs the inflated analytics.
+    const rolloverRows = await db.select({
+      id: tasks.id,
+      createdAt: tasks.createdAt,
+      taskDate: tasks.taskDate,
+      status: tasks.status,
+    }).from(tasks)
+      .where(and(eq(tasks.userId, userId), lte(tasks.taskDate, targetDate)))
+      .orderBy(desc(tasks.taskDate), desc(tasks.id));
+
+    const { duplicateIds, moveIds } = planTaskRollover(rolloverRows, targetDate);
+
+    if (duplicateIds.length) {
+      await db.delete(tasks).where(and(eq(tasks.userId, userId), inArray(tasks.id, duplicateIds)));
+    }
+    if (moveIds.length) {
+      await db.update(tasks).set({ taskDate: targetDate, updatedAt: now })
+        .where(and(eq(tasks.userId, userId), inArray(tasks.id, moveIds)));
     }
 
-    // Rollover is a daily snapshot: keep yesterday's record and copy only its
-    // unfinished tasks into today. createdAt is retained as the stable lineage key
-    // so repeated dashboard loads cannot create duplicate copies.
-    const sourceOpenTasks = await db.select().from(tasks)
-      .where(and(eq(tasks.userId, userId), eq(tasks.taskDate, sourceDate), ne(tasks.status, "completed")));
-    const copied = await copyMissingTasks(sourceOpenTasks, targetDate, userId, now);
-
-    return Response.json({ copied, repaired });
+    return Response.json({ moved: moveIds.length, removedDuplicates: duplicateIds.length });
   } catch (error) {
     return apiError(error);
   }
