@@ -113,27 +113,31 @@ test("normalizes category names before duplicate checks", async () => {
   assert.equal(normalizeCategoryName("FOLLOW-UP"), "follow-up");
 });
 
-test("rollover keeps the source day and copies only unfinished tasks", async () => {
+test("rollover moves unfinished tasks and removes legacy copies", async () => {
   const source = await readFile(
     path.join(root, "app/api/tasks/rollover/route.ts"),
     "utf8",
   );
 
-  assert.match(source, /insert\(tasks\)/);
-  assert.match(source, /eq\(tasks\.taskDate, sourceDate\)/);
-  assert.match(source, /ne\(tasks\.status, "completed"\)/);
-  assert.doesNotMatch(source, /update\(tasks\)/);
+  assert.match(source, /update\(tasks\)/);
+  assert.match(source, /delete\(tasks\)/);
+  assert.match(source, /lte\(tasks\.taskDate, targetDate\)/);
+  assert.doesNotMatch(source, /insert\(tasks\)/);
 });
 
-test("builds every missing calendar date for history repair", async () => {
-  const { dateRangeInclusive } = await vite.ssrLoadModule(
+test("plans catch-up rollover without duplicating completed work", async () => {
+  const { planTaskRollover } = await vite.ssrLoadModule(
     "/lib/task-rollover.ts",
   );
 
-  assert.deepEqual(dateRangeInclusive("2026-09-10", "2026-09-13"), [
-    "2026-09-10",
-    "2026-09-11",
-    "2026-09-12",
-    "2026-09-13",
-  ]);
+  const plan = planTaskRollover([
+    { id: 1, createdAt: "lineage-a", taskDate: "2026-09-10", status: "in_progress" },
+    { id: 2, createdAt: "lineage-a", taskDate: "2026-09-16", status: "in_progress" },
+    { id: 3, createdAt: "lineage-b", taskDate: "2026-09-15", status: "not_started" },
+    { id: 4, createdAt: "lineage-c", taskDate: "2026-09-14", status: "not_started" },
+    { id: 5, createdAt: "lineage-c", taskDate: "2026-09-15", status: "completed" },
+  ], "2026-09-17");
+
+  assert.deepEqual(plan.moveIds, [2, 3]);
+  assert.deepEqual(plan.duplicateIds, [1, 4]);
 });
